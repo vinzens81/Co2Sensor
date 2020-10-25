@@ -40,3 +40,8 @@ Here the Code snippet you need to Change:
 ```
 
 Never ever leak this information as it will grant access to your Wifi and Influx DB!
+
+# InfluxDB
+
+there is an minimal dashboard json file for influxDB2.0. It may work in crafana but i've never tested.
+Find in in influxdb20 folder
