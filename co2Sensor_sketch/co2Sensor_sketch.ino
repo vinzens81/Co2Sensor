@@ -50,28 +50,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // Display definition end
 //
 
-
-//
-// Wifi definition
-//
-#define WIFI_SSID "" // Never Publish this values
-#define WIFI_PASSWORD "" // Never Publish this values
-//
-// Wifi definition End
-//
-
-//
-// Influx DB Definition
-//
-#define INFLUXDB_URL "" // Never Publish this values
-#define INFLUXDB_TOKEN "" // Never Publish this values
-#define INFLUXDB_ORG "" // Never Publish this values
-#define INFLUXDB_BUCKET "" // Never Publish this values
-#define TZ_INFO "CET-1CEST,M3.5.0,M10.5.0/3"
-//
-// Influx DB Definition End
-//
-
+#include "settings.h"
 
 InfluxDBClient client(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 
@@ -170,8 +149,8 @@ void recalibrateSensor() {
       Serial.println("Failed to get baseline readings");
       return;
     }
-    //Serial.print("****Baseline values: eCO2: 0x"); Serial.print(eCO2_base, HEX);
-    //Serial.print(" & TVOC: 0x"); Serial.println(TVOC_base, HEX);
+    Serial.print("****Baseline values: eCO2: 0x"); Serial.print(eCO2_base, HEX);
+    Serial.print(" & TVOC: 0x"); Serial.println(TVOC_base, HEX);
   }
 }
 

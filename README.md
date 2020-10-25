@@ -12,6 +12,9 @@ You need to install some Libs in Arduino editor in order to compile it
 # Configs
 In order to have the Board send Data to your Influxdb, you need to setup Wifi and influx Credentials in the Code. Please fill the `""` according to your setup.
 
+The Code loads a separate settings file `co2Sensor_sketch/settings.h`
+Configure this file accordingly. Rename sample file and fill the needed parameter.
+
 Here the Code snippet you need to Change:
 ```
   53
