@@ -128,7 +128,7 @@ void loop() {
       break;
   }
   pixels.show();
-  
+
   displayText(sgp.eCO2, sgp.TVOC, text);
 
   writeInflux(sgp.eCO2, sgp.TVOC);
@@ -136,7 +136,27 @@ void loop() {
   recalibrateSensor();
 
   delay(1000);
+  if (WiFi.status() != WL_CONNECTED) {
+    ReconnectWifi();
+  }
 
+}
+
+void ReconnectWifi() {
+  int wifi_retry = 0;
+  while (WiFi.status() != WL_CONNECTED && wifi_retry < 5 ) {
+    wifi_retry++;
+    Serial.println("WiFi not connected. Try to reconnect");
+    WiFi.disconnect();
+    WiFi.mode(WIFI_OFF);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    delay(100);
+  }
+  if (wifi_retry >= 5) {
+    Serial.println("\nReboot");
+    ESP.restart();
+  }
 }
 
 void recalibrateSensor() {
