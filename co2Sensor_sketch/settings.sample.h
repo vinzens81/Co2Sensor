@@ -15,6 +15,7 @@
 #define INFLUXDB_ORG "" // Never Publish this values
 #define INFLUXDB_BUCKET "" // Never Publish this values
 #define TZ_INFO "CET-1CEST,M3.5.0,M10.5.0/3"
+#define DEVICE "SensorXYZ"
 //
 // Influx DB Definition End
 //
