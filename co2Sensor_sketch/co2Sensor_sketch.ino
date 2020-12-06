@@ -4,15 +4,38 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_NeoPixel.h>
-#include "Adafruit_SGP30.h"
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+#include <DHT_U.h>
+#include "MHZ19.h"
+#include <Arduino.h>
+#include <SoftwareSerial.h>
+#include "FS.h"
+
+
+
+#define DHTPIN 3
+#define RX_PIN D7
+#define TX_PIN D6
+#define DHTTYPE    DHT11
+MHZ19 myMHZ19;
+SoftwareSerial mySerial(RX_PIN, TX_PIN);
+#define BAUDRATE 9600                                      // Native to the sensor (do not change)
+
+DHT_Unified dht(DHTPIN, DHTTYPE);
+uint32_t delayMS;
+
+
+unsigned long getDataTimer = 0;
+
 
 #if defined(ESP32)
-  #include <WiFiMulti.h>
-  WiFiMulti wifiMulti;
-  #define DEVICE "ESP32"
+#include <WiFiMulti.h>
+WiFiMulti wifiMulti;
+#define DEVICE "ESP32"
 #elif defined(ESP8266)
-  #include <ESP8266WiFiMulti.h>
-  ESP8266WiFiMulti wifiMulti;
+#include <ESP8266WiFiMulti.h>
+ESP8266WiFiMulti wifiMulti;
 #endif
 
 #include <InfluxDbClient.h>
@@ -21,20 +44,6 @@
 #include "settings.h"
 
 
-//
-// Sensor Definition
-//
-const int EEpromWrite = 1; // intervall in which to write new baselines into EEPROM in hours
-unsigned long previousMillis = 0; // Millis at which the intervall started
-uint16_t TVOC_base;
-uint16_t eCO2_base;
-
-
-Adafruit_SGP30 sgp;
-
-//
-// Sensor Definition End
-//
 
 //
 // LED
@@ -63,12 +72,18 @@ InfluxDBClient client(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKE
 Point sensor("Co2_stats");
 
 int sensorResetCounter = 0;
+int histSensor1 = 0;
+int histSensor2 = 0;
+int histSensor3 = 0;
+int histCounter = 0;
 int sendDataToInfluxCounter = 0;
+
+void verifyRange(int range);
 
 void setup() {
   // Setup Serial
   Serial.begin(115200);
-    //Setup Display
+  //Setup Display
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("SSD1306 allocation failed"));
     for (;;); // Don't proceed, loop forever
@@ -76,23 +91,24 @@ void setup() {
   display.display();
   display.clearDisplay();
   displaySimpleText("Setup Wifi");
-  
- //Setup Wifi
+
+  //Setup Wifi
   WiFi.mode(WIFI_STA);
   wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to wifi");
-  int i=1;
+  int i = 1;
   while (wifiMulti.run() != WL_CONNECTED) {
     Serial.print(".");
     displaySimpleText("Setup Wifi " + String(i));
     i++;
     delay(100);
+    if (i > 100) {
+      displaySimpleText("Cannot Connect to Wifi!");
+      delay(5000);
+
+    }
   }
   Serial.println();
-  
-
-  EEPROM.begin(512);
-
 
   //Setup Influx Client
   sensor.addTag("device", DEVICE);
@@ -111,34 +127,49 @@ void setup() {
 
   delay(500);
   pixels.begin();
+  mySerial.begin(BAUDRATE);                               // Uno example: Begin Stream with MHZ19 baudrate
 
-  //Setup CO2 sensor
-  if (! sgp.begin()) {
-    Serial.println("Sensor not found :(");
-    displaySimpleText("No Co2 Sensor found!");
-    while (1);
-  }
-  Serial.print("Found SGP30 serial #");
-  Serial.print(sgp.serialnumber[0], HEX);
-  Serial.print(sgp.serialnumber[1], HEX);
-  Serial.println(sgp.serialnumber[2], HEX);
-  displaySimpleText("CO2 Sensor found!");
-  delay(500);
+  myMHZ19.begin(mySerial);
+  myMHZ19.setRange(2000);
+  myMHZ19.calibrateZero();
+  myMHZ19.setSpan(2000);
+  myMHZ19.autoCalibration(false);
 
-  //ResetValues in EEPROM
-  //EEPROM16_Write(1, 0); // Write new baselines into EEPROM
-  //EEPROM16_Write(10, 0);
-  
-  TVOC_base = EEPROM16_Read(1);
-  eCO2_base = EEPROM16_Read(10);
-  displaySimpleText("StartingValue " + String(TVOC_base));
-
-
-  if (eCO2_base != 0) sgp.setIAQBaseline(TVOC_base, eCO2_base);
-  Serial.print("****Baseline values in EEPROM: eCO2: 0x"); Serial.print(eCO2_base, HEX);
-  Serial.print(" & TVOC: 0x"); Serial.println(TVOC_base, HEX);
+  setupHumiditySensor();
 
 }
+
+
+void setupHumiditySensor() {
+  dht.begin();
+  Serial.println(F("DHTxx Unified Sensor Example"));
+  // Print temperature sensor details.
+  sensor_t sensor;
+  dht.temperature().getSensor(&sensor);
+  Serial.println(F("------------------------------------"));
+  Serial.println(F("Temperature Sensor"));
+  Serial.print  (F("Sensor Type: ")); Serial.println(sensor.name);
+  Serial.print  (F("Driver Ver:  ")); Serial.println(sensor.version);
+  Serial.print  (F("Unique ID:   ")); Serial.println(sensor.sensor_id);
+  Serial.print  (F("Max Value:   ")); Serial.print(sensor.max_value); Serial.println(F("°C"));
+  Serial.print  (F("Min Value:   ")); Serial.print(sensor.min_value); Serial.println(F("°C"));
+  Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("°C"));
+  Serial.println(F("------------------------------------"));
+  // Print humidity sensor details.
+  dht.humidity().getSensor(&sensor);
+  Serial.println(F("Humidity Sensor"));
+  Serial.print  (F("Sensor Type: ")); Serial.println(sensor.name);
+  Serial.print  (F("Driver Ver:  ")); Serial.println(sensor.version);
+  Serial.print  (F("Unique ID:   ")); Serial.println(sensor.sensor_id);
+  Serial.print  (F("Max Value:   ")); Serial.print(sensor.max_value); Serial.println(F("%"));
+  Serial.print  (F("Min Value:   ")); Serial.print(sensor.min_value); Serial.println(F("%"));
+  Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("%"));
+  Serial.println(F("------------------------------------"));
+  // Set delay between sensor readings based on sensor details.
+  delayMS = sensor.min_delay / 1000;
+
+}
+
 
 void displaySimpleText(String text) {
   display.clearDisplay();
@@ -152,10 +183,22 @@ void displaySimpleText(String text) {
 
 
 void loop() {
-  readValuesFromSensor();
+  delay(2000);
+  double co2ppm;
+  co2ppm = readValuesCo2ppm();
+  Serial.print("Co2: "); Serial.println(co2ppm);
 
+  sensors_event_t event;
+  double humidity;
+  humidity = getHumidity(event);
+  Serial.print("Humidity: "); Serial.println(humidity);
+  double temperatur;
+  temperatur = getTemperatur(event);
+  Serial.print("Temperatur: "); Serial.println(temperatur);
+
+  int ppm = int(co2ppm);
   String text = "";
-  switch (sgp.eCO2) {
+  switch (ppm) {
     case 0 ... 500:
       pixels.setPixelColor(0, pixels.Color(0, 0, 255));
       text = "Super";
@@ -175,17 +218,22 @@ void loop() {
   }
   pixels.show();
 
-  displayText(sgp.eCO2, sgp.TVOC, text);
-
-  writeInflux(sgp.eCO2, sgp.TVOC);
-
-  recalibrateSensor();
-
-  delay(1000);
+  writeInflux(co2ppm, temperatur, humidity);
+  displayText(co2ppm, temperatur, humidity, text);
   if (WiFi.status() != WL_CONNECTED) {
     ReconnectWifi();
   }
 
+}
+
+double getHumidity(sensors_event_t event) {
+  dht.humidity().getEvent(&event);
+  if (isnan(event.relative_humidity)) {
+    Serial.println(F("Error reading humidity!"));
+  }
+  else {
+    return (event.relative_humidity);
+  }
 }
 
 void ReconnectWifi() {
@@ -205,74 +253,24 @@ void ReconnectWifi() {
   }
 }
 
-void recalibrateSensor() {
-  sensorResetCounter++;
-  if (sensorResetCounter == 3000) {
-    sensorResetCounter = 0;
-    sgp.setIAQBaseline(TVOC_base, eCO2_base);
-
-    uint16_t TVOC_base, eCO2_base;
-    if (! sgp.getIAQBaseline(&eCO2_base, &TVOC_base)) {
-      Serial.println("Failed to get baseline readings");
-      return;
-    }
-    Serial.print("****Baseline values: eCO2: "); Serial.print(eCO2_base);
-    Serial.print(" & TVOC: "); Serial.println(TVOC_base);
-    // Prepare the EEPROMWrite intervall
-    unsigned long currentMillis = millis();
-    if (currentMillis - previousMillis >= EEpromWrite * 36000) {
-      Serial.println("Writing Base Values to EEPROM");
-      previousMillis = currentMillis; // reset the loop
-      sgp.getIAQBaseline(&eCO2_base, &TVOC_base); // get the new baseline
-      EEPROM16_Write(1, TVOC_base); // Write new baselines into EEPROM
-      EEPROM16_Write(10, eCO2_base);
-    }
+double getTemperatur(sensors_event_t event) {
+  dht.temperature().getEvent(&event);
+  if (isnan(event.temperature)) {
+    Serial.println(F("Error reading temperature!"));
+  }
+  else {
+    return (event.temperature);
   }
 }
 
-
-void EEPROM16_Write(uint8_t a, uint16_t b){
-  displaySimpleText("Store Data to EEPROM");
-
-  EEPROM.write(a, lowByte(b));
-  EEPROM.write(a + 1, highByte(b));
-  EEPROM.commit(); 
-  delay(100);
-}
-
-uint16_t EEPROM16_Read(uint8_t a){
-  return word(EEPROM.read(a + 1), EEPROM.read(a));
-}
-
-void readValuesFromSensor() {
-  float temperature = 22.1; // [°C]
-  float humidity = 45.2; // [%RH]
-  sgp.setHumidity(getAbsoluteHumidity(temperature, humidity));
-  if (! sgp.IAQmeasure()) {
-    Serial.println("Measurement failed");
-    return;
-  }
-
-  // Uncomment for debugging
-  //Serial.print("TVOC "); Serial.print(sgp.TVOC); Serial.print(" ppb ");
-  //Serial.print("eCO2 "); Serial.print(sgp.eCO2); Serial.println(" ppm");
-
-  if (! sgp.IAQmeasureRaw()) {
-    Serial.println("Raw Measurement failed");
-    return;
-  }
-  // Uncomment for debugging
-  //Serial.print("Raw H2 "); Serial.print(sgp.rawH2); Serial.print(" \t");
-  //Serial.print("Raw Ethanol "); Serial.print(sgp.rawEthanol); Serial.println("");
-}
-
-void writeInflux(int co2, int TVOC) {
+void writeInflux(double co2ppm, double temperatur, double humidity) {
   sendDataToInfluxCounter++;
   if (sendDataToInfluxCounter == 10 ) {
     sendDataToInfluxCounter = 0;
     sensor.clearFields();
-    sensor.addField("eCO2", co2);
-    sensor.addField("VOC", TVOC);
+    sensor.addField("co2", co2ppm);
+    sensor.addField("temp", temperatur);
+    sensor.addField("hum", humidity);
     Serial.print("Writing: "); Serial.println(sensor.toLineProtocol());
     if ((WiFi.RSSI() == 0) && (wifiMulti.run() != WL_CONNECTED)) {
       Serial.println("Wifi connection lost");
@@ -284,14 +282,9 @@ void writeInflux(int co2, int TVOC) {
   }
 }
 
-uint32_t getAbsoluteHumidity(float temperature, float humidity) {
-  const float absoluteHumidity = 216.7f * ((humidity / 100.0f) * 6.112f * exp((17.62f * temperature) / (243.12f + temperature)) / (273.15f + temperature)); // [g/m^3]
-  const uint32_t absoluteHumidityScaled = static_cast<uint32_t>(1000.0f * absoluteHumidity); // [mg/m^3]
-  return absoluteHumidityScaled;
-}
 
-void displayText(int co2, int voc, String text) {
-  String title=DEVICE;
+void displayText(double co2ppm, double temperatur, double humidity, String text) {
+  String title = DEVICE;
   title.remove(9);
   display.clearDisplay();
   display.setTextSize(2);
@@ -302,11 +295,76 @@ void displayText(int co2, int voc, String text) {
   display.println(title);
   display.setTextSize(1);
   display.setCursor(1, 20);
-  display.println("eCO2: " + String(co2));
+  display.println("CO2: " + String(co2ppm));
   display.setCursor(1, 28);
-  display.println("VOC: " + String(voc));
+  display.println("Temp: " + String(int(temperatur)) + " humid: " + String(int(humidity)));
   display.setTextSize(3);
   display.setCursor(0, 40);
   display.println(text);
   display.display();
+}
+
+
+double readValuesCo2ppm() {
+  if (millis() - getDataTimer >= 2000)
+  {
+    //    double adjustedCO2 = myMHZ19.getCO2Raw();
+    //    adjustedCO2 = 6.60435861e+15 * exp(-8.78661228e-04 * adjustedCO2);      // Exponential equation for Raw & CO2 relationship
+    //    double foo = (adjustedCO2);
+    //    //Serial.print(foo);
+    //    getDataTimer = millis();
+
+    int CO2;
+    CO2 = myMHZ19.getCO2();
+    if (CO2 == 0) {
+      Serial.println("\nReboot");
+      displaySimpleText("Sensor Filure, neet to reset");
+      delay(1000);
+      ESP.restart();
+    }
+
+    if (isValueNotChaning(CO2)) {
+      Serial.println("\nReboot");
+      displaySimpleText("Sensor Filure, neet to reset");
+      delay(1000);
+      ESP.restart();      
+    }
+    return (CO2);
+  }
+}
+
+boolean isValueNotChaning(int CO2){
+  histCounter++;
+  if (histCounter == 10) {
+    histCounter = 0;
+    histSensor3 = histSensor2;
+    histSensor2 = histSensor1;
+    histSensor1 = CO2;
+    Serial.print("Readings: co2:");
+    Serial.print(CO2);
+    Serial.print(", old1: ");
+    Serial.print(histSensor1);
+    Serial.print(", old2: ");
+    Serial.print(histSensor2);
+    Serial.print(", old3: ");
+    Serial.print(histSensor3);
+    Serial.println();
+    if (CO2 == histSensor1 && histSensor1 == histSensor2 && histSensor2 == histSensor3) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void verifyRange(int range)
+{
+  Serial.println("Requesting new range.");
+
+  myMHZ19.setRange(range);                             // request new range write
+
+  if (myMHZ19.getRange() == range)                     // Send command to device to return it's range value.
+    Serial.println("Range successfully applied.");   // Success
+
+  else
+    Serial.println("Failed to apply range.");        // Failed
 }
